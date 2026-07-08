@@ -79,7 +79,6 @@ $env:BIZFILE_URL="https://www.bizfile.gov.sg/"
 $env:CHROME_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe"
 $env:CHROME_USER_DATA_DIR="C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 2"
 $env:ACCEPT_LANGUAGE="en-US,en;q=0.9"
-$env:MANUAL_CHALLENGE_WAIT_MS="0"
 $env:DISABLE_SEARCH_API="false"
 $env:DISABLE_EXTRACT_API="true"
 $env:ENABLE_EXTRACT_API_FALLBACK="false"
@@ -177,15 +176,6 @@ $env:MANUAL_SEARCH_DELAY_MS="60000"
 node .\src\index.js
 ```
 
-To allow a manual recovery window when a visible BizFile challenge appears:
-
-```powershell
-$env:MANUAL_CHALLENGE_WAIT_MS="120000"
-npm start
-```
-
-When enabled, the headed Chrome window stays open for that duration. Solve the visible challenge manually, then the scraper rechecks the page and continues if the challenge is gone.
-
 ## Output
 
 The API response is returned to the caller and also written to:
@@ -247,7 +237,7 @@ One UEN test returned no extract filings for the selected period. This is logged
 
 ### Error Response Example
 
-When BizFile presents CAPTCHA, suspicious activity, or a security check, the scraper stops and returns a structured error:
+When BizFile flags a session as suspicious or returns a security response, the scraper stops and returns a structured error:
 
 ```json
 {
@@ -367,20 +357,19 @@ $env:ENABLE_EXTRACT_API_FALLBACK="false"
 
 ## Task Constraints And How They Are Handled
 
-### reCAPTCHA
+### Access Risk Handling
 
-The Extracts search form can be protected by Google reCAPTCHA. During testing, BizFile also returned suspicious-attempt responses from backend endpoints when the session was risk-flagged.
+During testing, BizFile returned suspicious-attempt responses from backend endpoints when the session was risk-flagged.
 
 Current handling:
 
-- The scraper does not include an automated CAPTCHA solver.
-- It detects CAPTCHA, suspicious-activity, and security-check screens.
-- When `MANUAL_CHALLENGE_WAIT_MS` is set, visible challenges can be resolved manually in the open Chrome window before the scraper rechecks the page.
-- If no manual wait is configured, or the challenge remains after the wait, it stops the run, saves a screenshot, and returns a structured error instead of retrying aggressively.
+- It detects suspicious-activity and security-check responses.
+- It stops the run, saves a screenshot, and returns a structured error instead of retrying aggressively.
+- It keeps the automation UI-first and session-consistent to reduce unnecessary risk signals.
 
 Reasoning:
 
-This is a government portal, so the safer POC approach is graceful challenge detection and manual recovery rather than automated CAPTCHA solving or forced bypass.
+This is a government portal, so the safer POC approach is graceful risk detection and controlled failure rather than forced retries.
 
 ### Dynamic Rendering And SPA Behaviour
 
@@ -408,8 +397,7 @@ Current handling:
 - The scraper runs one job at a time through an in-process queue.
 - It uses a persistent Chrome profile for a stable browser session.
 - It uses realistic delays between important actions.
-- It avoids repeated retries after challenge screens.
-- It can pause for a human to resolve a visible challenge when `MANUAL_CHALLENGE_WAIT_MS` is enabled.
+- It avoids repeated retries after risk or security responses.
 - It treats genuine no-data pages as valid `200` responses with `filingCount: 0`.
 - `src/index.js` includes manual delay support for debugging so searches are not repeatedly submitted while fixing later steps.
 
@@ -432,13 +420,13 @@ Current handling:
 
 Tradeoff:
 
-These measures reduce obvious automation signals, but they do not guarantee non-detection. BizFile can still evaluate profile history, device/IP reputation, CAPTCHA state, request cadence, and interaction patterns.
+These measures reduce obvious automation signals, but they do not guarantee non-detection. BizFile can still evaluate profile history, device/IP reputation, request cadence, and interaction patterns.
 
 ## Anti-Bot Approach And Tradeoffs
 
 The first attempt used a more traditional Puppeteer stealth setup with a stealth plugin and was checked against a public bot-detection test site to understand basic automation fingerprints.
 
-That approach can still get caught. Puppeteer stealth plugins do not guarantee non-detected automation, and BizFile can still evaluate session history, request cadence, browser profile, CAPTCHA state, IP/device reputation, and interaction patterns.
+That approach can still get caught. Puppeteer stealth plugins do not guarantee non-detected automation, and BizFile can still evaluate session history, request cadence, browser profile, IP/device reputation, and interaction patterns.
 
 Because of that, the current implementation uses `puppeteer-real-browser` instead of relying only on the stealth-plugin approach.
 
@@ -453,9 +441,9 @@ To reduce risk and make the flow more realistic, the project uses:
 - Randomized pauses between interactions.
 - SPA-aware element waits instead of blind fast clicking.
 - One scrape at a time through an in-process queue.
-- Challenge detection for CAPTCHA, suspicious activity, and security-check screens.
+- Detection for suspicious activity and security-check responses.
 
-The scraper does not attempt to solve or bypass CAPTCHA. If BizFile flags the session, the code stops and returns a structured error.
+If BizFile flags the session, the code stops and returns a structured error.
 
 ## IP Rotation And Session Management
 
@@ -522,7 +510,7 @@ npm start
 
 ## Limitations
 
-- BizFile can still show suspicious-activity or CAPTCHA challenges.
+- BizFile can still return suspicious-activity or security-check responses.
 - A successful run depends on the Chrome profile/session being in good standing.
 - Company-name search uses exact-name matching, so the input must match BizFile's entity name closely.
 - The direct Extract API fallback is disabled by default because UI scraping was safer during testing.
