@@ -348,6 +348,8 @@ The Extract API scraper remains in the code as an opt-in fallback only if the UI
 $env:ENABLE_EXTRACT_API_FALLBACK="true"
 ```
 
+For the fallback path, I also checked the live page's loaded JavaScript and network calls. The page loads Google's `api.js` with a public `render=` site key, and that same public key is kept in the scraper so tokenized backend requests are made from the active browser page context. The returned page-context token is then passed as the `g-recaptcha-response` field on the matching BizFile API request.
+
 By default:
 
 ```powershell
