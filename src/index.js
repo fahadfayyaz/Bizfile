@@ -2,6 +2,7 @@
 // it augments the installed puppeteer with plugin functionality
 const puppeteer = require('puppeteer-extra')
 const fs = require('fs')
+const path = require('path')
 
 // add stealth plugin and use defaults (all evasion techniques)
 const StealthPlugin = require('puppeteer-extra-plugin-stealth')
@@ -15,7 +16,20 @@ const manualSearchDelayMs = Number.isFinite(configuredManualSearchDelayMs) && co
   ? configuredManualSearchDelayMs
   : 60000
 const extractPageSize = Number(process.env.EXTRACT_PAGE_SIZE || 10)
-const resultJsonPath = 'bizfile-api-result.json'
+const resultDir = 'results'
+const screenshotDir = 'Screenshot'
+
+function getScreenshotPath(fileName) {
+  fs.mkdirSync(screenshotDir, { recursive: true })
+  return path.join(screenshotDir, fileName)
+}
+
+function getResultPath(fileName) {
+  fs.mkdirSync(resultDir, { recursive: true })
+  return path.join(resultDir, fileName)
+}
+
+const resultJsonPath = getResultPath('bizfile-api-result.json')
 
 const loaderSelectors = [
   '[class*="loader" i]',
@@ -871,8 +885,8 @@ async function submitUenSearch(page) {
 
   if (loadedAfterClick) return
 
-  await page.screenshot({ path: 'bizfile-search-not-submitted.png', fullPage: true }).catch(() => {})
-  throw new Error('Search did not navigate after one click. Stopped without retries; check bizfile-search-not-submitted.png before continuing manually.')
+  await page.screenshot({ path: getScreenshotPath('bizfile-search-not-submitted.png'), fullPage: true }).catch(() => {})
+  throw new Error('Search did not navigate after one click. Stopped without retries; check Screenshot/bizfile-search-not-submitted.png before continuing manually.')
 }
 
 async function waitForEntityDetails(page) {
@@ -1819,7 +1833,7 @@ async function collectFilingsFromVisibleUi(page, entityContext = {}) {
   return dedupeFilings(filings)
 }
 
-async function saveVisibleExtractDebug(page, path = 'bizfile-ui-debug.json') {
+async function saveVisibleExtractDebug(page, filePath = getResultPath('bizfile-ui-debug.json')) {
   const debug = await page.evaluate(() => {
     const clean = value => String(value || '').replace(/\s+/g, ' ').trim()
     const isVisible = node => {
@@ -1864,7 +1878,7 @@ async function saveVisibleExtractDebug(page, path = 'bizfile-ui-debug.json') {
       .slice(0, 120)
   }).catch(error => [{ error: error.message }])
 
-  fs.writeFileSync(path, `${JSON.stringify({
+  fs.writeFileSync(filePath, `${JSON.stringify({
     url: page.url(),
     capturedAt: new Date().toISOString(),
     nodes: debug
@@ -2087,14 +2101,14 @@ puppeteer.launch({
     }
 
     writeScrapeResult(scrapeResult)
-    console.log(`Scraped ${filings.length} filing(s). Result written to bizfile-api-result.json.`)
+    console.log(`Scraped ${filings.length} filing(s). Result written to results/bizfile-api-result.json.`)
 
     await humanPause(2500, 3800)
 
-    await page.screenshot({ path: 'testresult1.png', fullPage: true })
-    console.log('All done, check bizfile-api-result.json and testresult1.png.')
+    await page.screenshot({ path: getScreenshotPath('testresult1.png'), fullPage: true })
+    console.log('All done, check results/bizfile-api-result.json and Screenshot/testresult1.png.')
   } catch (error) {
-    await page.screenshot({ path: 'bizfile-error.png', fullPage: true }).catch(() => {})
+    await page.screenshot({ path: getScreenshotPath('bizfile-error.png'), fullPage: true }).catch(() => {})
     console.error(`Automation failed: ${error.message}`)
     process.exitCode = 1
   } finally {

@@ -50,13 +50,16 @@ If the request contains `uen`, `companyNumber`, `companyUen`, or `entityNumber`,
 ## Project Files
 
 ```text
-.
-|-- server.js                 # Express API server
-|-- scraper.js                # Main BizFile automation and scraper
-|-- index.js                  # Manual/debug browser runner
-|-- bizfile-api-result.json   # Latest scrape result and result history
-|-- www.bizfile.gov.sg.har    # HAR used to understand expected API/UI data
-|-- .env.example              # Runtime configuration examples
+your-project/
+|-- src/
+|  |-- server.js             # Express API server
+|  |-- scraper.js            # Main BizFile automation and scraper
+|  `-- index.js              # Manual/debug browser runner
+|-- results/
+|  |-- bizfile-api-result.json  # Latest scrape result and result history
+|  `-- bizfile-ui-debug.json    # Visible DOM/text snapshot if UI parsing fails
+|-- www.bizfile.gov.sg.har   # HAR used to understand expected API/UI data
+|-- .env.example             # Runtime configuration examples
 |-- package.json
 `-- README.md
 ```
@@ -97,7 +100,7 @@ Use the same pattern for the manual debug runner:
 
 ```powershell
 $env:CHROME_USER_DATA_DIR="C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 4"
-node .\index.js
+node .\src\index.js
 ```
 
 You can also set the Chrome executable path:
@@ -159,10 +162,10 @@ Equivalent name fields:
 
 ## Manual Debug Runner
 
-`index.js` is kept as a manual/debug runner:
+`src/index.js` is kept as a manual/debug runner:
 
 ```powershell
-node .\index.js
+node .\src\index.js
 ```
 
 This runner opens BizFile in headed Chrome and gives a manual delay before continuing. During debugging, this helped avoid repeated automated search submissions while testing downstream locators and pagination.
@@ -171,7 +174,7 @@ Tune the manual delay:
 
 ```powershell
 $env:MANUAL_SEARCH_DELAY_MS="60000"
-node .\index.js
+node .\src\index.js
 ```
 
 ## Output
@@ -179,7 +182,7 @@ node .\index.js
 The API response is returned to the caller and also written to:
 
 ```text
-bizfile-api-result.json
+results/bizfile-api-result.json
 ```
 
 The JSON file keeps the latest result at the top level and stores per-company history in `results[]`, so different UEN/company-name runs do not overwrite previous company results.
@@ -243,7 +246,7 @@ When BizFile presents CAPTCHA, suspicious activity, or a security check, the scr
   "details": {
     "stage": "extracts search",
     "challenge": "suspicious activity message detected",
-    "screenshot": "bizfile-api-error.png"
+    "screenshot": "Screenshot/bizfile-api-error.png"
   }
 }
 ```
@@ -266,7 +269,7 @@ The automated browser flow is:
 12. Select the maximum `Items per page` value.
 13. Scrape visible `.extract-results-card` cards.
 14. Paginate through all result pages until the visible pagination total is reached.
-15. Return JSON and update `bizfile-api-result.json`.
+15. Return JSON and update `results/bizfile-api-result.json`.
 
 ## Important UI Locators
 
@@ -398,7 +401,7 @@ Current handling:
 - It uses realistic delays between important actions.
 - It avoids repeated retries after challenge screens.
 - It treats genuine no-data pages as valid `200` responses with `filingCount: 0`.
-- `index.js` includes manual delay support for debugging so searches are not repeatedly submitted while fixing later steps.
+- `src/index.js` includes manual delay support for debugging so searches are not repeatedly submitted while fixing later steps.
 
 Reasoning:
 
@@ -453,7 +456,7 @@ Current session strategy:
 - Avoid repeated retries.
 - Queue requests so only one scrape runs at a time.
 - Prefer UI scraping over direct backend API calls.
-- Use manual debug delays in `index.js` while investigating issues.
+- Use manual debug delays in `src/index.js` while investigating issues.
 
 `PROXY_URL` exists as a Chrome launch option for environments where a legitimate stable proxy is required, but no proxy/IP rotation is enabled by default.
 
@@ -462,16 +465,16 @@ Current session strategy:
 Debug artifacts:
 
 ```text
-bizfile-api-result.json   # latest result and history
-bizfile-api-error.png     # screenshot on API scraper failure
-bizfile-error.png         # screenshot on manual runner failure
-bizfile-ui-debug.json     # visible DOM/text snapshot if UI parsing fails
-testresult1.png           # manual runner screenshot
+results/bizfile-api-result.json   # latest result and history
+Screenshot/bizfile-api-error.png   # screenshot on API scraper failure
+Screenshot/bizfile-error.png       # screenshot on manual runner failure
+results/bizfile-ui-debug.json     # visible DOM/text snapshot if UI parsing fails
+Screenshot/testresult1.png         # manual runner screenshot
 server.log
 server.err
 ```
 
-`index.js` was intentionally kept for debugging because it allows manual delay before search. This helped validate downstream steps without repeatedly submitting searches while locators, cards, and pagination were being fixed.
+`src/index.js` was intentionally kept for debugging because it allows manual delay before search. This helped validate downstream steps without repeatedly submitting searches while locators, cards, and pagination were being fixed.
 
 ## Testing
 

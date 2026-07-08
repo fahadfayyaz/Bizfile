@@ -2,11 +2,11 @@
   "name": "test1",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "scrape": "node index.js",
-    "check": "node --check index.js && node --check scraper.js && node --check server.js",
+    "start": "node src/server.js",
+    "scrape": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/scraper.js && node --check src/server.js",
     "test": "npm run check"
   },
   "keywords": [],

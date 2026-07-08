@@ -1,11 +1,25 @@
 const puppeteer = require('puppeteer-extra')
 const StealthPlugin = require('puppeteer-extra-plugin-stealth')
 const fs = require('fs')
+const path = require('path')
 
 puppeteer.use(StealthPlugin())
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
-const resultJsonPath = 'bizfile-api-result.json'
+const resultDir = 'results'
+const screenshotDir = 'Screenshot'
+
+function getScreenshotPath(fileName) {
+  fs.mkdirSync(screenshotDir, { recursive: true })
+  return path.join(screenshotDir, fileName)
+}
+
+function getResultPath(fileName) {
+  fs.mkdirSync(resultDir, { recursive: true })
+  return path.join(resultDir, fileName)
+}
+
+const resultJsonPath = getResultPath('bizfile-api-result.json')
 
 function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min
@@ -592,7 +606,7 @@ async function assertNoAccessChallenge(page, stage) {
     // cooldown. CAPTCHA/WAF blocks mean "stop and have a human look at this" —
     // hammering them with retries is exactly the wrong response.
     retryable: challenge.type === 'rate_limit',
-    screenshot: 'bizfile-api-error.png'
+    screenshot: getScreenshotPath('bizfile-api-error.png')
   })
 }
 
@@ -2224,7 +2238,7 @@ async function collectFilingsFromDom(page, uen) {
   return filings
 }
 
-async function saveVisibleExtractDebug(page, path = 'bizfile-ui-debug.json') {
+async function saveVisibleExtractDebug(page, filePath = getResultPath('bizfile-ui-debug.json')) {
   const debug = await page.evaluate(() => {
     const clean = value => String(value || '').replace(/\s+/g, ' ').trim()
     const isVisible = node => {
@@ -2269,7 +2283,7 @@ async function saveVisibleExtractDebug(page, path = 'bizfile-ui-debug.json') {
       .slice(0, 120)
   }).catch(error => [{ error: error.message }])
 
-  fs.writeFileSync(path, `${JSON.stringify({
+  fs.writeFileSync(filePath, `${JSON.stringify({
     url: page.url(),
     capturedAt: new Date().toISOString(),
     nodes: debug
@@ -2423,7 +2437,7 @@ async function runScrapeAttempt(normalizedInput) {
 
     await openExtracts(page)
     const filings = await collectFilings(page, context.companyNumber)
-    await page.screenshot({ path: 'bizfile-api-result.png', fullPage: true }).catch(() => {})
+    await page.screenshot({ path: getScreenshotPath('bizfile-api-result.png'), fullPage: true }).catch(() => {})
 
     const result = {
       companyName: context.companyName || searchResult.entity?.companyName || normalizedInput.companyName,
@@ -2438,7 +2452,7 @@ async function runScrapeAttempt(normalizedInput) {
 
     return writeScrapeResult(result)
   } catch (error) {
-    await page.screenshot({ path: 'bizfile-api-error.png', fullPage: true }).catch(() => {})
+    await page.screenshot({ path: getScreenshotPath('bizfile-api-error.png'), fullPage: true }).catch(() => {})
     throw error
   } finally {
     await browser.close()
