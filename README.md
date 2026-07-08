@@ -50,7 +50,7 @@ If the request contains `uen`, `companyNumber`, `companyUen`, or `entityNumber`,
 ## Project Files
 
 ```text
-your-project/
+BIZFILE/
 |-- src/
 |  |-- server.js             # Express API server
 |  |-- scraper.js            # Main BizFile automation and scraper
