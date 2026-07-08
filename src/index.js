@@ -1,12 +1,6 @@
-// puppeteer-extra is a drop-in replacement for puppeteer,
-// it augments the installed puppeteer with plugin functionality
-const puppeteer = require('puppeteer-extra')
+const { connect } = require('puppeteer-real-browser')
 const fs = require('fs')
 const path = require('path')
-
-// add stealth plugin and use defaults (all evasion techniques)
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-puppeteer.use(StealthPlugin())
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const humanPause = (min = 250, max = min) => delay(randomBetween(min, max))
@@ -24,9 +18,43 @@ function getScreenshotPath(fileName) {
   return path.join(screenshotDir, fileName)
 }
 
+function getManualChallengeWaitMs() {
+  const configured = Number(process.env.MANUAL_CHALLENGE_WAIT_MS || 0)
+  return Number.isFinite(configured) && configured > 0 ? configured : 0
+}
+
 function getResultPath(fileName) {
   fs.mkdirSync(resultDir, { recursive: true })
   return path.join(resultDir, fileName)
+}
+
+function getBrowserConnectOptions() {
+  const args = [
+    '--start-maximized',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-infobars',
+    '--no-default-browser-check',
+    '--no-first-run'
+  ]
+
+  if (process.env.PROXY_URL) {
+    args.push(`--proxy-server=${process.env.PROXY_URL}`)
+  }
+
+  return {
+    headless: false,
+    args,
+    customConfig: {
+      chromePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+      userDataDir: process.env.CHROME_USER_DATA_DIR || 'C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 2'
+    },
+    turnstile: true,
+    connectOption: {
+      defaultViewport: null
+    },
+    disableXvfb: false,
+    ignoreAllFlags: false
+  }
 }
 
 const resultJsonPath = getResultPath('bizfile-api-result.json')
@@ -1174,7 +1202,31 @@ async function assertNoAccessChallenge(page, stage) {
   const challenge = await getAccessChallenge(page)
   if (!challenge) return
 
+  if (await waitForManualChallengeResolution(page, stage, challenge)) {
+    return
+  }
+
   throw new Error(`BizFile access challenge detected at ${stage}: ${challenge}`)
+}
+
+async function waitForManualChallengeResolution(page, stage, challenge) {
+  const waitMs = getManualChallengeWaitMs()
+  if (!waitMs) return false
+
+  const screenshotPath = getScreenshotPath('bizfile-error.png')
+  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
+
+  console.warn(`BizFile access challenge detected at ${stage}: ${challenge}. Resolve it in the open Chrome window; rechecking in ${Math.round(waitMs / 1000)}s.`)
+  await delay(waitMs)
+
+  const remainingChallenge = await getAccessChallenge(page)
+  if (remainingChallenge) {
+    console.warn(`BizFile access challenge is still present at ${stage}: ${remainingChallenge}.`)
+    return false
+  }
+
+  console.warn(`BizFile access challenge appears resolved at ${stage}; continuing.`)
+  return true
 }
 
 function normalizeText(value) {
@@ -1962,23 +2014,8 @@ function writeScrapeResult(result) {
   return output
 }
 
-// puppeteer usage as normal
-puppeteer.launch({
-  headless: false,
-  executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  userDataDir: 'C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Default',
-  defaultViewport: null,
-  ignoreDefaultArgs: ['--enable-automation'],
-  args: [
-    '--start-maximized',
-    '--disable-blink-features=AutomationControlled',
-    '--disable-infobars',
-    '--no-default-browser-check',
-    '--no-first-run'
-  ]
-}).then(async browser => {
+connect(getBrowserConnectOptions()).then(async ({ browser, page }) => {
   console.log('Running tests..')
-  const page = await browser.newPage()
   await preparePageForBizFile(page)
   page.setDefaultTimeout(60000)
   page.setDefaultNavigationTimeout(90000)

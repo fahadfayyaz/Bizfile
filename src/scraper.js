@@ -1,9 +1,6 @@
-const puppeteer = require('puppeteer-extra')
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+const { connect } = require('puppeteer-real-browser')
 const fs = require('fs')
 const path = require('path')
-
-puppeteer.use(StealthPlugin())
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const resultDir = 'results'
@@ -20,6 +17,11 @@ function getResultPath(fileName) {
 }
 
 const resultJsonPath = getResultPath('bizfile-api-result.json')
+
+function getManualChallengeWaitMs() {
+  const configured = Number(process.env.MANUAL_CHALLENGE_WAIT_MS || 0)
+  return Number.isFinite(configured) && configured > 0 ? configured : 0
+}
 
 function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min
@@ -596,6 +598,10 @@ async function assertNoAccessChallenge(page, stage) {
 
   if (!challenge) return
 
+  if (domChallenge && await waitForManualChallengeResolution(page, stage, challenge)) {
+    return
+  }
+
   throw createHttpError(403, 'BizFile access challenge detected', {
     stage,
     type: challenge.type, // 'captcha' | 'rate_limit' | 'waf_block' | 'unknown_block'
@@ -610,7 +616,28 @@ async function assertNoAccessChallenge(page, stage) {
   })
 }
 
-function getLaunchOptions() {
+async function waitForManualChallengeResolution(page, stage, challenge) {
+  const waitMs = getManualChallengeWaitMs()
+  if (!waitMs || challenge.type === 'rate_limit') return false
+
+  const screenshotPath = getScreenshotPath('bizfile-api-error.png')
+  await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
+
+  console.warn(`BizFile access challenge detected at ${stage}: ${challenge.detail}. Resolve it in the open Chrome window; rechecking in ${Math.round(waitMs / 1000)}s.`)
+  await delay(waitMs)
+
+  const remainingChallenge = await classifyPageChallenge(page)
+  if (remainingChallenge) {
+    console.warn(`BizFile access challenge is still present at ${stage}: ${remainingChallenge.detail}.`)
+    return false
+  }
+
+  page.__lastMainFrameResponse = null
+  console.warn(`BizFile access challenge appears resolved at ${stage}; continuing.`)
+  return true
+}
+
+function getBrowserConnectOptions() {
   const args = [
     '--start-maximized',
     '--disable-blink-features=AutomationControlled',
@@ -625,11 +652,17 @@ function getLaunchOptions() {
 
   return {
     headless: false,
-    executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
-    userDataDir: process.env.CHROME_USER_DATA_DIR || 'C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 2',
-    defaultViewport: null,
-    ignoreDefaultArgs: ['--enable-automation'],
-    args
+    args,
+    customConfig: {
+      chromePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+      userDataDir: process.env.CHROME_USER_DATA_DIR || 'C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 2'
+    },
+    turnstile: true,
+    connectOption: {
+      defaultViewport: null
+    },
+    disableXvfb: false,
+    ignoreAllFlags: false
   }
 }
 
@@ -2415,8 +2448,7 @@ async function scrapeBizfileFilings(input) {
 }
 
 async function runScrapeAttempt(normalizedInput) {
-  const browser = await puppeteer.launch(getLaunchOptions())
-  const page = await browser.newPage()
+  const { browser, page } = await connect(getBrowserConnectOptions())
   await preparePageForBizFile(page)
   page.setDefaultTimeout(60000)
   page.setDefaultNavigationTimeout(90000)

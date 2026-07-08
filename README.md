@@ -17,8 +17,7 @@ The primary approach is browser automation through the live BizFile UI.
 Tech stack:
 
 - `Node.js` and `Express` for the local API server.
-- `puppeteer-extra` for browser automation.
-- `puppeteer-extra-plugin-stealth` to reduce common automation fingerprints.
+- `puppeteer-real-browser` for browser automation with a real Chrome connection flow.
 - Headed Google Chrome with a persistent Chrome profile for session continuity.
 - Plain JavaScript/CommonJS to stay close to the existing `Test1` project setup.
 
@@ -50,7 +49,7 @@ If the request contains `uen`, `companyNumber`, `companyUen`, or `entityNumber`,
 ## Project Files
 
 ```text
-BIZFILE/
+your-project/
 |-- src/
 |  |-- server.js             # Express API server
 |  |-- scraper.js            # Main BizFile automation and scraper
@@ -80,6 +79,7 @@ $env:BIZFILE_URL="https://www.bizfile.gov.sg/"
 $env:CHROME_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe"
 $env:CHROME_USER_DATA_DIR="C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 2"
 $env:ACCEPT_LANGUAGE="en-US,en;q=0.9"
+$env:MANUAL_CHALLENGE_WAIT_MS="0"
 $env:DISABLE_SEARCH_API="false"
 $env:DISABLE_EXTRACT_API="true"
 $env:ENABLE_EXTRACT_API_FALLBACK="false"
@@ -176,6 +176,15 @@ Tune the manual delay:
 $env:MANUAL_SEARCH_DELAY_MS="60000"
 node .\src\index.js
 ```
+
+To allow a manual recovery window when a visible BizFile challenge appears:
+
+```powershell
+$env:MANUAL_CHALLENGE_WAIT_MS="120000"
+npm start
+```
+
+When enabled, the headed Chrome window stays open for that duration. Solve the visible challenge manually, then the scraper rechecks the page and continues if the challenge is gone.
 
 ## Output
 
@@ -366,12 +375,12 @@ Current handling:
 
 - The scraper does not include an automated CAPTCHA solver.
 - It detects CAPTCHA, suspicious-activity, and security-check screens.
-- When a challenge appears, it stops the run, saves a screenshot, and returns a structured error instead of retrying aggressively.
-- `CAPTCHA_API_KEY` is left as a documented placeholder only; no solver is wired into the current POC.
+- When `MANUAL_CHALLENGE_WAIT_MS` is set, visible challenges can be resolved manually in the open Chrome window before the scraper rechecks the page.
+- If no manual wait is configured, or the challenge remains after the wait, it stops the run, saves a screenshot, and returns a structured error instead of retrying aggressively.
 
 Reasoning:
 
-This is a government portal, so the safer POC approach is graceful challenge detection rather than automated CAPTCHA solving or forced bypass.
+This is a government portal, so the safer POC approach is graceful challenge detection and manual recovery rather than automated CAPTCHA solving or forced bypass.
 
 ### Dynamic Rendering And SPA Behaviour
 
@@ -400,6 +409,7 @@ Current handling:
 - It uses a persistent Chrome profile for a stable browser session.
 - It uses realistic delays between important actions.
 - It avoids repeated retries after challenge screens.
+- It can pause for a human to resolve a visible challenge when `MANUAL_CHALLENGE_WAIT_MS` is enabled.
 - It treats genuine no-data pages as valid `200` responses with `filingCount: 0`.
 - `src/index.js` includes manual delay support for debugging so searches are not repeatedly submitted while fixing later steps.
 
@@ -414,7 +424,7 @@ Standard automation signals can be detected by BizFile.
 Current handling:
 
 - The project uses headed Chrome instead of headless mode.
-- It uses `puppeteer-extra` with `puppeteer-extra-plugin-stealth`.
+- It uses `puppeteer-real-browser` with `turnstile: true`.
 - It removes Puppeteer's default `--enable-automation` launch argument.
 - It keeps a real Chrome profile and consistent language headers.
 - It adds human-like mouse movement, random hover warmups, and randomized pauses.
@@ -426,15 +436,17 @@ These measures reduce obvious automation signals, but they do not guarantee non-
 
 ## Anti-Bot Approach And Tradeoffs
 
-The first attempt used `puppeteer-extra` with `puppeteer-extra-plugin-stealth` and was checked against a public bot-detection test site to understand basic automation fingerprints.
+The first attempt used a more traditional Puppeteer stealth setup with a stealth plugin and was checked against a public bot-detection test site to understand basic automation fingerprints.
 
-Puppeteer stealth plugins do not guarantee non-detected automation. BizFile can still evaluate session history, request cadence, browser profile, CAPTCHA state, IP/device reputation, and interaction patterns.
+That approach can still get caught. Puppeteer stealth plugins do not guarantee non-detected automation, and BizFile can still evaluate session history, request cadence, browser profile, CAPTCHA state, IP/device reputation, and interaction patterns.
+
+Because of that, the current implementation uses `puppeteer-real-browser` instead of relying only on the stealth-plugin approach.
 
 To reduce risk and make the flow more realistic, the project uses:
 
 - Headed Chrome rather than headless mode.
 - A persistent real Chrome user profile.
-- `puppeteer-extra-plugin-stealth`.
+- `puppeteer-real-browser` with `turnstile: true`.
 - Removal of Puppeteer's default `--enable-automation` launch argument.
 - Human-like mouse movement before key interactions.
 - Random hover warmups.
