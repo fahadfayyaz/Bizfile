@@ -1,0 +1,6 @@
+node_modules/
+
+# Generated run artifacts
+*.log
+*.err
+8.png
