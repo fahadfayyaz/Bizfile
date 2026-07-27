@@ -1,6 +1,5 @@
 node_modules/
-
-# Generated run artifacts
+dist/
+.env
+.browser-profile/
 *.log
-*.err
-8.png

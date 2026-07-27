@@ -1,518 +1,279 @@
-# Singapore BizFile Filing Extract Scraper
+# BizFile Filings Service
 
-This project is an AsiaVerify POC for collecting Singapore BizFile filing extract metadata by UEN or exact company name.
+A small Node.js / TypeScript service that takes a Singapore company name or UEN, pulls that company's filing extracts from [bizfile.gov.sg](https://www.bizfile.gov.sg), and returns them as structured JSON.
 
-The local service exposes:
+It gets past BizFile's reCAPTCHA **without any third-party CAPTCHA solving service** — no 2Captcha, no CapSolver, no API key. The reasoning is in [Anti-bot approach](#anti-bot-approach) below.
 
-```text
-POST /api/sgp/filings
-```
+---
 
-The scraper opens BizFile in headed Chrome, searches the entity, navigates through `More information` > `Information products` > `Extracts`, selects the last five-year lodgement period, paginates through visible extract result cards, and returns filing records as JSON.
+## Requirements
 
-## Approach
+- **Node.js 18+**
+- **Google Chrome installed** on the machine. The service drives your real Chrome rather than downloading a Chromium build — this matters for the CAPTCHA score, and it is why the install is small and `playwright install` is never needed.
 
-The primary approach is browser automation through the live BizFile UI.
+## Install and run
 
-Tech stack:
-
-- `Node.js` and `Express` for the local API server.
-- `puppeteer-real-browser` for browser automation with a real Chrome connection flow.
-- Headed Google Chrome with a persistent Chrome profile for session continuity.
-- Plain JavaScript/CommonJS to stay close to the existing `Test1` project setup.
-
-Why this stack:
-
-- BizFile is a JavaScript-heavy single-page app, so static HTML scraping is unreliable.
-- Search results, entity details, Extracts controls, cards, and pagination load asynchronously.
-- Puppeteer lets us wait for real UI elements, loaders, result cards, and pagination state.
-- Express gives a simple API wrapper around the browser workflow.
-
-## Search Coverage
-
-The API supports both UEN and company-name search.
-
-UEN input uses BizFile's exact UEN filter:
-
-```text
-UEN (including previous UEN)
-```
-
-Company-name input uses BizFile's exact name filter:
-
-```text
-Name exact match
-```
-
-If the request contains `uen`, `companyNumber`, `companyUen`, or `entityNumber`, the scraper selects the UEN filter. If the request contains `companyName`, `entityName`, or `name`, the scraper selects `Name exact match`.
-
-## Project Files
-
-```text
-your-project/
-|-- src/
-|  |-- server.js             # Express API server
-|  |-- scraper.js            # Main BizFile automation and scraper
-|  `-- index.js              # Manual/debug browser runner
-|-- results/
-|  |-- bizfile-api-result.json  # Latest scrape result and result history
-|  `-- bizfile-ui-debug.json    # Visible DOM/text snapshot if UI parsing fails
-|-- www.bizfile.gov.sg.har   # HAR used to understand expected API/UI data
-|-- .env.example             # Runtime configuration examples
-|-- package.json
-`-- README.md
-```
-
-## Setup
-
-Install dependencies:
-
-```powershell
+```bash
 npm install
-```
-
-Recommended environment variables:
-
-```powershell
-$env:PORT="3000"
-$env:BIZFILE_URL="https://www.bizfile.gov.sg/"
-$env:CHROME_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe"
-$env:CHROME_USER_DATA_DIR="C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 2"
-$env:ACCEPT_LANGUAGE="en-US,en;q=0.9"
-$env:DISABLE_SEARCH_API="false"
-$env:DISABLE_EXTRACT_API="true"
-$env:ENABLE_EXTRACT_API_FALLBACK="false"
-```
-
-`DISABLE_EXTRACT_API=true` and `ENABLE_EXTRACT_API_FALLBACK=false` keep extraction UI-first. The direct Extract API fallback is intentionally disabled by default.
-
-## Change Chrome Profile Path From Command Line
-
-Set `CHROME_USER_DATA_DIR` before starting the API server:
-
-```powershell
-$env:CHROME_USER_DATA_DIR="C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 4"
+cp .env.example .env      # Windows: copy .env.example .env
+npm run build
 npm start
 ```
 
-Use the same pattern for the manual debug runner:
+The server starts on `http://localhost:3000`.
 
-```powershell
-$env:CHROME_USER_DATA_DIR="C:/Users/Fahad Fayyaz/AppData/Local/Google/Chrome/User Data/Profile 4"
-node .\src\index.js
+For development with auto-reload:
+
+```bash
+npm run dev
 ```
 
-You can also set the Chrome executable path:
+To regenerate the sample outputs in `./samples`:
 
-```powershell
-$env:CHROME_PATH="C:/Program Files/Google/Chrome/Application/chrome.exe"
+```bash
+npm run sample
+npm run sample -- 196300440G "KODLAND PTE. LTD."   # or specific companies
 ```
 
-Use one stable Chrome profile that can open BizFile normally. Avoid switching profiles repeatedly during testing because inconsistent session history can increase suspicious-activity risk.
+---
 
-## Run The API Server
+## API
 
-```powershell
-npm start
-```
+### `POST /api/sgp/filings`
 
-Health check:
+Provide **at least one** of the two fields.
 
-```powershell
-Invoke-RestMethod http://localhost:3000/health
-```
-
-## API Call By UEN
-
-```powershell
-Invoke-RestMethod -Method Post http://localhost:3000/api/sgp/filings `
-  -ContentType 'application/json' `
-  -Body '{"uen":"202133190E"}' | ConvertTo-Json -Depth 10
-```
-
-Equivalent UEN fields:
-
-```json
+```jsonc
 {
-  "uen": "202133190E",
-  "companyNumber": "202133190E",
-  "companyUen": "202133190E",
-  "entityNumber": "202133190E"
+  "companyName": "ECOMMERCE ENABLERS PTE. LTD.",  // optional
+  "companyNumber": "201411189G"                    // optional, UEN
 }
 ```
 
-## API Call By Company Name
+If both are given, the UEN wins — it is unambiguous and it also skips a CAPTCHA-guarded endpoint, so it is both more reliable and faster.
 
-```powershell
-Invoke-RestMethod -Method Post http://localhost:3000/api/sgp/filings `
-  -ContentType 'application/json' `
-  -Body '{"companyName":"LNG ALPHA SHIPPING PTE. LTD."}' | ConvertTo-Json -Depth 10
-```
-
-Equivalent name fields:
+**200 response**
 
 ```json
 {
-  "companyName": "LNG ALPHA SHIPPING PTE. LTD.",
-  "entityName": "LNG ALPHA SHIPPING PTE. LTD.",
-  "name": "LNG ALPHA SHIPPING PTE. LTD."
-}
-```
-
-## Manual Debug Runner
-
-`src/index.js` is kept as a manual/debug runner:
-
-```powershell
-node .\src\index.js
-```
-
-This runner opens BizFile in headed Chrome and gives a manual delay before continuing. During debugging, this helped avoid repeated automated search submissions while testing downstream locators and pagination.
-
-Tune the manual delay:
-
-```powershell
-$env:MANUAL_SEARCH_DELAY_MS="60000"
-node .\src\index.js
-```
-
-## Output
-
-The API response is returned to the caller and also written to:
-
-```text
-results/bizfile-api-result.json
-```
-
-The JSON file keeps the latest result at the top level and stores per-company history in `results[]`, so different UEN/company-name runs do not overwrite previous company results.
-
-### Successful Response Example
-
-Actual successful run for `LNG ALPHA SHIPPING PTE. LTD.` / `202133190E` returned 35 filings. Shortened example:
-
-```json
-{
-  "companyName": "LNG ALPHA SHIPPING PTE. LTD.",
-  "companyNumber": "202133190E",
-  "filingCount": 35,
+  "companyName": "ECOMMERCE ENABLERS PTE. LTD.",
+  "companyNumber": "201411189G",
   "filings": [
-    {
-      "docName": "Appointment of Liquidators/Provisional Liquidator",
-      "filingDate": "2026-05-20",
-      "transactionNo": "T260613248",
-      "transactionDate": "2026-05-20",
-      "lodgedDate": "",
-      "lodgedBy": "LUM CHI LUP BENNY",
-      "price": ""
-    },
-    {
-      "docName": "Notice of resolution",
-      "filingDate": "2026-05-20",
-      "transactionNo": "T260613229",
-      "transactionDate": "2026-05-20",
-      "lodgedDate": "",
-      "lodgedBy": "LUM CHI LUP BENNY",
-      "price": ""
-    }
+    { "docName": "File notice of resolution - Ordinary / Special", "filingDate": "2025-04-09" },
+    { "docName": "File notice of resolution - Ordinary / Special", "filingDate": "2025-04-09" }
   ],
-  "message": "Filings scraped successfully.",
-  "scrapedAt": "2026-07-08T06:59:03.027Z"
+  "scrapedAt": "2026-07-26T16:06:38.999Z"
 }
 ```
 
-### No-Data Response Example
+Every row the extract table shows is returned, unfiltered, exactly as the brief asks. Pagination is followed to the end, so `filings` is the complete set, not just the first page.
 
-One UEN test returned no extract filings for the selected period. This is logged as a valid API result instead of an exception:
+### Errors
+
+All failures return the same envelope, never a stack trace:
 
 ```json
-{
-  "companyName": "UNFOLD PTE. LTD.",
-  "companyNumber": "201408775N",
-  "filingCount": 0,
-  "filings": [],
-  "message": "No filings found for the selected lodgement period.",
-  "scrapedAt": "2026-07-08T06:51:35.273Z"
-}
+{ "error": { "code": "COMPANY_NOT_FOUND", "message": "...", "details": { } } }
 ```
 
-### Error Response Example
+| HTTP | `code` | When |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | Neither field supplied, or the UEN is malformed |
+| 404 | `COMPANY_NOT_FOUND` | No such entity, or the name matched several and none exactly |
+| 502 | `UPSTREAM_ERROR` | BizFile answered with an error of its own |
+| 503 | `ANTIBOT_BLOCKED` | BizFile rejected the CAPTCHA token on every retry |
+| 504 | `TIMEOUT` | The request exceeded `REQUEST_TIMEOUT_MS` |
+| 500 | `BROWSER_ERROR` / `INTERNAL_ERROR` | Chrome would not start, or something genuinely unexpected |
 
-When BizFile flags a session as suspicious or returns a security response, the scraper stops and returns a structured error:
+A name that matches several entities returns the candidate list, so the caller can retry with a UEN:
 
 ```json
 {
-  "error": "BizFile access challenge detected",
-  "details": {
-    "stage": "extracts search",
-    "challenge": "suspicious activity message detected",
-    "screenshot": "Screenshot/bizfile-api-error.png"
+  "error": {
+    "code": "COMPANY_NOT_FOUND",
+    "message": "\"UNFOLD\" did not match a single entity. Pass companyNumber (UEN) to disambiguate.",
+    "details": {
+      "candidates": [
+        { "uen": "202207757M", "name": "STUDIO UNFOLD PTE. LTD.", "status": "LIVECO" },
+        { "uen": "201408775N", "name": "UNFOLD PTE. LTD.", "status": "SO" }
+      ]
+    }
   }
 }
 ```
 
-## UI Automation Flow
+### `GET /health`
 
-The automated browser flow is:
+Returns `{ "status": "ok", "config": { ... } }`. The proxy password is never included.
 
-1. Open `https://www.bizfile.gov.sg/`.
-2. Enter UEN or company name in the search box.
-3. Select keyword match type: UEN selects `UEN (including previous UEN)`, company name selects `Name exact match`.
-4. Submit search.
-5. Click `More information` on the matching result.
-6. Click `Information products`.
-7. Click `Extracts`.
-8. Wait for SPA loaders to disappear and the Extracts form to be visible.
-9. Select `Last 5 Years` in `Lodgement period`.
-10. Click `Search extracts`.
-11. Wait for result cards and pagination to become visible and stable.
-12. Select the maximum `Items per page` value.
-13. Scrape visible `.extract-results-card` cards.
-14. Paginate through all result pages until the visible pagination total is reached.
-15. Return JSON and update `results/bizfile-api-result.json`.
+---
 
-## Important UI Locators
+## Environment variables
 
-Search:
+| Variable | Default | Notes |
+|---|---|---|
+| `PORT` | `3000` | HTTP port |
+| `CHROME_CHANNEL` | `chrome` | Use real Chrome. `chromium` or `msedge` also work but score lower |
+| `HEADLESS` | `false` | Headless scores lower with reCAPTCHA v3. On a Linux server run headful under Xvfb |
+| `USER_DATA_DIR` | `./.browser-profile` | Persistent profile. Reusing it across runs is a large part of the trust score |
+| `PAGE_SETTLE_MS` | `8000` | How long to let the page settle before minting a token. Lower it and scores drop |
+| `PROXY_URL` | *(unset)* | `http://user:pass@host:port`. Optional locally, effectively required on a server |
+| `LODGEMENT_PERIOD` | `0-5` | `0-5` is "Last 5 years". Also `0-1`…`0-4`, `5-10`, `10-25`, `25` |
+| `PAGE_SIZE` | `40` | 40 is BizFile's maximum |
+| `MAX_CAPTCHA_RETRIES` | `3` | Retries when a token is rejected |
+| `MIN_REQUEST_GAP_MS` | `1500` | Minimum spacing between upstream calls |
+| `REQUEST_TIMEOUT_MS` | `300000` | Ceiling for one API request. A company with many filings takes minutes |
 
-```css
-#input-search-bar
-#keyword-match-type-dropdown .cmp-dropdown-menu__select
-#keyword-match-type-dropdown .cmp-dropdown-menu-select-button
-#keyword-match-type-dropdown .cmp-dropdown-list-button
-#federated-search-dropdown-bottom-search-btn
+There is deliberately **no `CAPTCHA_API_KEY`**. Nothing in this project needs one.
+
+---
+
+## Anti-bot approach
+
+### What BizFile actually uses
+
+The Extracts feature lives in a React micro-frontend served from `/ips/remoteEntry.js`. Reading that bundle shows the protection precisely:
+
+- **reCAPTCHA is invisible v3**, site key `6LfIEuIq…` (a public value, present in the page source).
+- The token is sent in the **`g-recaptcha-response`** request header.
+- Rejection surfaces as BizFile error code **`CORELIB-VAL-016`** — *"Suspicious attempt detected. Try to use the browser you frequently use or use a different device."*
+
+### Why no solver service is used
+
+reCAPTCHA v3 never shows a puzzle. There is no image grid, no audio challenge, nothing a human or a solver farm can complete on your behalf. It silently returns a **score**, and BizFile refuses anything below its threshold.
+
+So a solving service has nothing to solve here. The only way through is to *earn a good score*, which comes down to three things:
+
+1. **A genuine browser.** The service drives real installed Chrome through Playwright (`channel: "chrome"`), not a downloaded Chromium, and clears the most obvious automation flag. In testing this alone was enough — no stealth plugin was required.
+2. **A browser with history.** A persistent `USER_DATA_DIR` means Google sees a returning browser with real cookies rather than a fresh sandbox on every run. One long-lived session is shared across all requests for the same reason.
+3. **A reputable IP.** This is the one that actually decides it in practice (see below).
+
+### Do not fake the fingerprint you cannot back up
+
+Worth recording, because it cost real time to find: setting Playwright's `locale` and `timezoneId` to `en-SG` / `Asia/Singapore` — which seems like the obvious thing to do when scraping a Singapore site — made every single token get rejected.
+
+Playwright applies those through CDP emulation, and both the override itself and the contradiction it creates (a page insisting it is in Singapore on a machine that plainly is not) are signals. Removing the two lines took the service from failing every request to passing every request, with nothing else changed.
+
+The browser now inherits the real machine's locale and timezone. Consistency beats a fingerprint you have made up.
+
+### Requests are issued from inside the page
+
+The same request sent from Node with axios or `fetch` is refused at the edge with a bare `403`, no matter which headers you copy across — it is the browser's own TLS and session identity being checked, not the header list. So every call is made with `page.evaluate(() => fetch(...))`, from the loaded BizFile origin. To the server it is simply the site calling its own API, with the real cookies and the real TLS fingerprint.
+
+This also means the CAPTCHA token and the API call it authorises always originate from **the same browser and the same IP**. Splitting them across processes is a good way to fail verification.
+
+### Tokens are single-use
+
+A token that has already been spent is rejected exactly like no token at all. Every request mints a fresh one via `grecaptcha.execute(siteKey, { action: "submit" })`. There is no token cache anywhere in this codebase, on purpose.
+
+### Retries, pacing and failure
+
+- A rejected token is retried up to `MAX_CAPTCHA_RETRIES` with linear backoff, minting a new token each time. Speeding up after a rejection is what deepens a flag on the IP, so backoff widens.
+- Every upstream call is serialised through a queue with a `MIN_REQUEST_GAP_MS` floor. Concurrent hammering is the fastest way to get an IP flagged.
+- Errors that are *not* CAPTCHA-related are not retried — that would just be noise.
+- When retries are exhausted the error says what is actually wrong (IP reputation) rather than a generic failure, because that is the only lead worth acting on.
+
+### IP reputation, and deploying to a server
+
+This is the part that decides whether it works in production.
+
+An IP that has been flagged stays flagged, and **datacenter IPs score worst of all** with reCAPTCHA v3. A build that runs perfectly on a home connection can fail on the first request from a cloud VM.
+
+The fix is a **residential or ISP proxy** via `PROXY_URL`. Prefer sticky sessions over per-request rotation: a stable IP builds reputation, while rotating through fresh IPs throws that away every call. This was verified end-to-end through a residential proxy — token minted, both endpoints returned `200`, filings came back.
+
+Note that a proxy is **not** a CAPTCHA solver. It is explicitly on the brief's allowed list, and it introduces no third-party service into the solving path.
+
+---
+
+## Third-party services used
+
+| Service | Used? |
+|---|---|
+| CAPTCHA solver (2Captcha, CapSolver, …) | **No** |
+| Cloud scraping API | **No** |
+| Proxy provider | **Optional**, via `PROXY_URL`. Recommended for server deployment |
+
+The only runtime dependencies are `express`, `dotenv` and `playwright-core`.
+
+---
+
+## Sample output
+
+`./samples` contains real responses.
+
+| File | Company | Filings |
+|---|---|---|
+| `201411189G.json` | ECOMMERCE ENABLERS PTE. LTD. | 98 |
+| `196300440G.json` | FRASERS PROPERTY LIMITED | 30 |
+| `202245370D.json` | KODLAND PTE. LTD. | 14 |
+| `201408775N.json` | UNFOLD PTE. LTD. | 0 |
+
+`201411189G` spans three pages inside one category alone, so it exercises pagination properly.
+
+`201408775N` legitimately has none — it was struck off and its last filing was in 2018, outside the five-year window. It is kept in the samples to show the empty case is handled rather than hidden. It was also resolved **by name**, from a search that returned six similar entities, which is where name matching usually goes wrong.
+
+---
+
+## How it works
+
+```
+POST /api/sgp/filings
+        |
+        v
+ validate input  ---------------------------------> 400 VALIDATION_ERROR
+        |
+        v
+ resolve entity
+   UEN given  ->  GET  /api/entity/v1/ez/entityInfoIps      (no CAPTCHA)
+   name given ->  POST /api/infoproduct/v2/ez/entities      (CAPTCHA)
+        |                                                   |
+        |                                                   +-> 404 if no single match
+        v
+ fetch filings: every category, every page
+   POST /api/extract/v1/ez/extracts/ishop                   (CAPTCHA, fresh token per page)
+        |
+        v
+ merge, dedupe by extractId, sort newest first
+        |
+        v
+ map rows -> { docName, filingDate }  and return
 ```
 
-Entity details:
+**Categories must be swept individually.** Sending `extractCategory: ""` looks like "no filter", but it is not — it behaves like a narrow default and silently returns a fraction of the data. For UEN `201411189G` it returns **2** rows; sweeping the six real categories returns **98**. The category list is read from `/api/codes/v2/ez/extract-category` rather than hardcoded, each one is paginated to the end, and the results are merged and deduplicated by `extractId`.
 
-```css
-#button-1
-button.wrapper.L1-tab
-button.wrapper.L2-tab
+A note on name resolution: BizFile stores an entity's name split into the distinctive part (`UNFOLD`) and a numeric suffix code (`311`). The two have to be rejoined via the `suffix` code table before `UNFOLD PTE. LTD.` can be matched, otherwise every lookup by name either misses or picks the wrong company. That table is fetched once and cached.
+
+### Project structure
+
+```
+src/
+  server.ts    Express app, route, error mapping
+  scraper.ts   the BizFile flow: resolve entity, paginate filings, map rows
+  bizfile.ts   API layer: token minting, in-page fetch, retry policy
+  browser.ts   the long-lived Chrome session and its request queue
+  config.ts    environment parsing
+  errors.ts    typed errors -> HTTP status codes
+  types.ts     request/response and BizFile payload types
+scripts/
+  sample.ts    regenerates ./samples
+samples/       real captured responses
 ```
 
-Extract cards:
-
-```css
-[data-testid="extract-results-card"]
-.extract-results-card
-.extract-result-main .headline-6--bold
-.cmp-information-snippet
-.cmp-information-snippet_label
-.cmp-information-snippet-value-horizontal-container
-.extract-price-attachment .headline-6--bold
-```
-
-Pagination:
-
-```css
-#cmp-pagination-bar
-#cmp-pagination-bar-item-per-page
-#cmp-pagination-bar-button-page
-.page-number-from-to
-.total-items-number
-.right-arrow-control
-.cmp-dropdown-menu__select
-.cmp-dropdown-menu-select-button
-.cmp-dropdown-list-button
-.cmp-dropdown-list-item
-```
-
-## Waiting Strategy For BizFile SPA
-
-BizFile loads most content asynchronously. The scraper does not rely on static scraping.
-
-Implemented waits:
-
-- Wait for page loaders, spinners, skeletons, and `aria-busy` states to disappear.
-- Wait for specific dropdowns/buttons before clicking.
-- Wait for Extract result cards to be visible.
-- Wait for transaction snippets inside cards.
-- Wait until result-card count and pagination fingerprint are stable before scraping.
-- Wait again after each pagination click before reading the next page.
-
-This avoids reading partially rendered React/SPA content.
-
-## API Fallback
-
-The HAR showed BizFile has backend JSON APIs, including an Extracts endpoint:
-
-```text
-POST /api/extract/v1/ez/extracts/ishop
-```
-
-However, direct backend calls were more likely to trigger suspicious-attempt responses during testing. Because of that, the primary extraction method is headed browser UI interaction.
-
-The Extract API scraper remains in the code as an opt-in fallback only if the UI changes in the future:
-
-```powershell
-$env:ENABLE_EXTRACT_API_FALLBACK="true"
-```
-
-For the fallback path, I also checked the live page's loaded JavaScript and network calls. The page loads Google's `api.js` with a public `render=` site key, and that same public key is kept in the scraper so tokenized backend requests are made from the active browser page context. The returned page-context token is then passed as the `g-recaptcha-response` field on the matching BizFile API request.
-
-By default:
-
-```powershell
-$env:DISABLE_EXTRACT_API="true"
-$env:ENABLE_EXTRACT_API_FALLBACK="false"
-```
-
-## Task Constraints And How They Are Handled
-
-### Access Risk Handling
-
-During testing, BizFile returned suspicious-attempt responses from backend endpoints when the session was risk-flagged.
-
-Current handling:
-
-- It detects suspicious-activity and security-check responses.
-- It stops the run, saves a screenshot, and returns a structured error instead of retrying aggressively.
-- It keeps the automation UI-first and session-consistent to reduce unnecessary risk signals.
-
-Reasoning:
-
-This is a government portal, so the safer POC approach is graceful risk detection and controlled failure rather than forced retries.
-
-### Dynamic Rendering And SPA Behaviour
-
-BizFile is a JavaScript-heavy single-page app. Search results, entity details, Extracts form controls, result cards, and pagination all load asynchronously after user actions.
-
-Current handling:
-
-- The scraper waits for visible elements before clicking.
-- It waits for loaders, spinners, skeletons, and `aria-busy` states to disappear.
-- It waits for Extract result cards to be visible before scraping.
-- It waits for transaction snippets inside result cards.
-- It waits until result-card count and pagination fingerprint are stable before reading.
-- It waits again after each pagination action before scraping the next page.
-
-Reasoning:
-
-Naive static scraping fails because the DOM can exist before React has rendered the real result content.
-
-### Session And Rate Limiting
-
-BizFile tracks browser sessions. Rapid repeated searches, direct backend calls, or repeated failed automation can trigger rate limiting, suspicious-activity screens, or silent empty results.
-
-Current handling:
-
-- The scraper runs one job at a time through an in-process queue.
-- It uses a persistent Chrome profile for a stable browser session.
-- It uses realistic delays between important actions.
-- It avoids repeated retries after risk or security responses.
-- It treats genuine no-data pages as valid `200` responses with `filingCount: 0`.
-- `src/index.js` includes manual delay support for debugging so searches are not repeatedly submitted while fixing later steps.
-
-Reasoning:
-
-Stable session behavior was preferred over IP rotation or rapid retry loops.
-
-### Bot Detection Signals
-
-Standard automation signals can be detected by BizFile.
-
-Current handling:
-
-- The project uses headed Chrome instead of headless mode.
-- It uses `puppeteer-real-browser` with `turnstile: true`.
-- It removes Puppeteer's default `--enable-automation` launch argument.
-- It keeps a real Chrome profile and consistent language headers.
-- It adds human-like mouse movement, random hover warmups, and randomized pauses.
-- It primarily uses visible UI interaction instead of direct backend API scraping.
-
-Tradeoff:
-
-These measures reduce obvious automation signals, but they do not guarantee non-detection. BizFile can still evaluate profile history, device/IP reputation, request cadence, and interaction patterns.
-
-## Anti-Bot Approach And Tradeoffs
-
-The first attempt used a more traditional Puppeteer stealth setup with a stealth plugin and was checked against a public bot-detection test site to understand basic automation fingerprints.
-
-That approach can still get caught. Puppeteer stealth plugins do not guarantee non-detected automation, and BizFile can still evaluate session history, request cadence, browser profile, IP/device reputation, and interaction patterns.
-
-Because of that, the current implementation uses `puppeteer-real-browser` instead of relying only on the stealth-plugin approach.
-
-To reduce risk and make the flow more realistic, the project uses:
-
-- Headed Chrome rather than headless mode.
-- A persistent real Chrome user profile.
-- `puppeteer-real-browser` with `turnstile: true`.
-- Removal of Puppeteer's default `--enable-automation` launch argument.
-- Human-like mouse movement before key interactions.
-- Random hover warmups.
-- Randomized pauses between interactions.
-- SPA-aware element waits instead of blind fast clicking.
-- One scrape at a time through an in-process queue.
-- Detection for suspicious activity and security-check responses.
-
-If BizFile flags the session, the code stops and returns a structured error.
-
-## IP Rotation And Session Management
-
-During testing, suspicious-activity and rate-limit style responses were encountered. The safer decision was not to rotate IPs aggressively, because random IP rotation can make a government portal session look less consistent.
-
-Current session strategy:
-
-- Use one stable Chrome profile.
-- Keep browser behavior headed and visible.
-- Avoid repeated retries.
-- Queue requests so only one scrape runs at a time.
-- Prefer UI scraping over direct backend API calls.
-- Use manual debug delays in `src/index.js` while investigating issues.
-
-`PROXY_URL` exists as a Chrome launch option for environments where a legitimate stable proxy is required, but no proxy/IP rotation is enabled by default.
-
-## Debugging Notes
-
-Debug artifacts:
-
-```text
-results/bizfile-api-result.json   # latest result and history
-Screenshot/bizfile-api-error.png   # screenshot on API scraper failure
-Screenshot/bizfile-error.png       # screenshot on manual runner failure
-results/bizfile-ui-debug.json     # visible DOM/text snapshot if UI parsing fails
-Screenshot/testresult1.png         # manual runner screenshot
-server.log
-server.err
-```
-
-`src/index.js` was intentionally kept for debugging because it allows manual delay before search. This helped validate downstream steps without repeatedly submitting searches while locators, cards, and pagination were being fixed.
-
-## Testing
-
-Static validation:
-
-```powershell
-npm test
-```
-
-Run server:
-
-```powershell
-npm start
-```
-
-Restart the server after code changes:
-
-```powershell
-Ctrl+C
-npm start
-```
-
-## What I Would Do Differently With More Time
-
-- Add fixture-based parser tests using saved Extract card HTML and pagination HTML.
-- Add typed request/response contracts with TypeScript.
-- Add structured per-stage logs and timings.
-- Add persistent cooldown/rate-limit state across server restarts.
-- Add a cleaner result store instead of only JSON file output.
-- Add a controlled test harness for UEN and company-name search flows.
-- Add monitoring for selector drift when BizFile changes UI classes.
-- Explore an official/approved data access route if available, since that is preferable to automating a government portal.
-
-## Limitations
-
-- BizFile can still return suspicious-activity or security-check responses.
-- A successful run depends on the Chrome profile/session being in good standing.
-- Company-name search uses exact-name matching, so the input must match BizFile's entity name closely.
-- The direct Extract API fallback is disabled by default because UI scraping was safer during testing.
+---
+
+## Known limitations
+
+- **A flagged IP cannot be fixed in code.** If `ANTIBOT_BLOCKED` persists, the IP is the cause, and a residential proxy is the remedy. No amount of retrying changes the score.
+- **Chrome must be installed.** Deliberate — a downloaded Chromium scores measurably worse. On a server this means installing Chrome and, if running headful, Xvfb.
+- **Throughput is modest by design.** Requests are serialised with a spacing floor. It protects the IP, but it means this is not built for high-concurrency bulk scraping as it stands. Sweeping seven categories also means a single lookup costs at least eight CAPTCHA-guarded calls — measured at roughly 30s for a company with 98 filings and 13s for one with 14, including Chrome start-up on the first request. Correctness was the priority over speed here; if BizFile ever exposes a genuine "all categories" value, this collapses back to one call per page.
+- **One browser session, one IP.** There is no proxy pool. A single `PROXY_URL` is used for the whole process.
+- **Name search returns at most 10 candidates.** A very generic name may not include the intended company; pass the UEN in that case.
+- **`LODGEMENT_PERIOD` buckets do not overlap.** `5-10` means five-to-ten years ago, not the last ten years. The default `0-5` is what the brief asks for.
+
+## Possible improvements
+
+- A pool of browser sessions, each pinned to its own sticky residential IP, to lift throughput while keeping per-IP pacing intact.
+- Persist the resolved name-to-UEN mapping so repeat lookups skip a CAPTCHA-guarded call entirely.
+- Expose `lodgementPeriod` as an optional per-request field rather than a process-wide env var.
+- A circuit breaker that pauses the whole process for a cooldown after repeated `ANTIBOT_BLOCKED`, instead of continuing to spend requests from an IP that is currently distrusted.
+- Prometheus counters for token rejection rate — the single best early warning that an IP's reputation is degrading.
